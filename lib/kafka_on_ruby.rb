@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "kafka_on_ruby/version"
-require_relative "kafka_on_ruby/generator"
 require_relative "kafka_on_ruby/cli"
 
 module KafkaOnRuby
