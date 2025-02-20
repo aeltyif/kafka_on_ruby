@@ -9,7 +9,7 @@ module KafkaOnRuby
     argument :project_name, type: :string
 
     def self.source_root
-      File.expand_path("../../templates", __dir__) # Ensures templates are used
+      File.expand_path("templates", __dir__) # Ensures templates are used
     end
 
     def create_project_structure
@@ -34,7 +34,7 @@ module KafkaOnRuby
     end
 
     def generate_files
-      template "docker-compose.yml.tt", "docker-compose.yml"
+      template "../docker-compose.yml.tt", "docker-compose.yml"
       create_file "README.md", "# #{project_name}\n\nThis is a generated project."
       create_file "config/constants.rb", "constants #{project_name.capitalize}"
       create_file "config/boot.rb", "boot #{project_name.capitalize}"

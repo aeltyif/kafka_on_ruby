@@ -1,0 +1,259 @@
+---
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.1
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2187:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SASL_ENABLED: "false"
+
+  broker:
+    image: confluentinc/cp-kafka:7.3.1
+    hostname: broker
+    container_name: broker
+    depends_on:
+      - zookeeper
+    ports:
+      - "10098:10098"
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_PLAINTEXT_HOST:SASL_PLAINTEXT,INTERNAL_PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://broker:9092,SASL_PLAINTEXT_HOST://localhost:29092,INTERNAL_PLAINTEXT://broker:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=WARN,kafka.foo.bar=DEBUG"
+      KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
+      KAFKA_TOOLS_LOG4J_LOGLEVEL: ERROR
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_SECURITY_INTER_BROKER_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_MESSAGE_MAX_BYTES: 8000000
+      ZOOKEEPER_SASL_ENABLED: "false"
+      KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf
+      KAFKA_JMX_OPTS: >
+        -Dcom.sun.management.jmxremote
+        -Dcom.sun.management.jmxremote.authenticate=false
+        -Dcom.sun.management.jmxremote.ssl=false
+        -Djava.rmi.server.hostname=broker
+        -Dcom.sun.management.jmxremote.rmi.port=10098
+        -Dcom.sun.management.jmxremote.port=10098
+    volumes:
+      - ./docker/kafka_server_jass.conf:/etc/kafka/kafka_server_jaas.conf
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.3.1
+    hostname: schema-registry
+    container_name: schema-registry
+    depends_on:
+      - zookeeper
+      - broker
+    ports:
+      - "8089:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker:9093'
+      SCHEMA_REGISTRY_AUTHENTICATION_METHOD: 'BASIC'
+      SCHEMA_REGISTRY_AUTHENTICATION_ROLES: 'admin,developer,user,sr-user'
+      SCHEMA_REGISTRY_AUTHENTICATION_REALM: 'HTTP-Server-Props'
+      SCHEMA_REGISTRY_OPTS: -Djava.security.auth.login.config=/etc/kafka_clients_jass.conf
+    volumes:
+      - ./docker/kafka_clients_jass.conf:/etc/kafka_clients_jass.conf
+      - ./docker/relam.properties:/etc/relam.properties
+
+  connect:
+    image: confluentinc/cp-kafka-connect:7.3.1
+    hostname: connect
+    container_name: connect
+    depends_on:
+      - zookeeper
+      - broker
+      - schema-registry
+    ports:
+      - "8085:8083"
+      - "1099:1099"
+    volumes:
+      - ./confluent-hub-components:/usr/share/kafka/plugins
+    environment:
+      CONNECT_GROUP_ID: "connect-cluster"
+      CONNECT_BOOTSTRAP_SERVERS: broker:9093
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_REST_PORT: 8083
+      CONNECT_CONFIG_STORAGE_TOPIC: "_connect-configs"
+      CONNECT_OFFSET_STORAGE_TOPIC: "_connect-offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "_connect-statuses"
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.storage.StringConverter"
+      CONNECT_VALUE_CONVERTER: "io.confluent.connect.avro.AvroConverter"
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      CONNECT_VALUE_CONVERTER_BASIC_AUTH_CREDENTIALS_SOURCE: USER_INFO
+      CONNECT_VALUE_CONVERTER_BASIC_AUTH_USER_INFO: consumer:secret
+      CONNECT_PLUGIN_PATH: "/usr/share/kafka/plugins"
+      KAFKA_JMX_OPTS: >
+        -Djava.rmi.server.hostname=localhost
+        -Dcom.sun.management.jmxremote
+        -Dcom.sun.management.jmxremote.port=1099
+        -Dcom.sun.management.jmxremote.authenticate=false
+        -Dcom.sun.management.jmxremote.ssl=false
+        -Dcom.sun.management.jmxremote.rmi.port=1099
+
+  redis:
+    image: redis:6-alpine
+    container_name: redis
+    hostname: redis
+    command: redis-server
+    ports:
+      - "6379:6379"
+
+  el-ciclo-db:
+    image: debezium/postgres:14-alpine
+    container_name: el-ciclo-db
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data # Do we need this ?
+      - ./tmp:/tmp
+    ports:
+      - "5437:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+
+  psql-integrations-db:
+    image: debezium/postgres:14-alpine
+    container_name: psql-integrations-db
+    volumes:
+      - ./tmp:/tmp
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=integrations_development
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+
+  attendance-integrations-processor:
+    image: attendance-integrations-processor:latest
+    container_name: attendance-integrations-processor
+    depends_on:
+      - el-ciclo-db
+      - psql-integrations-db
+    entrypoint: /bin/sh
+    volumes:
+      - ./:/myapp
+    environment:
+      APP_ENV: 'development'
+      KAFKA_SERVERS: 'broker:9092'
+      KAFKA_USERNAME: 'consumer'
+      KAFKA_PASSWORD: 'secret'
+      SCHEMA_URL: 'http://schema-registry:8081'
+      SCHEMA_USERNAME: 'consumer'
+      SCHEMA_PASSWORD: 'secret'
+      REDIS_URI: 'redis://redis:6379'
+      DB_HOST: 'psql-integrations-db'
+      DB_DATABASE: 'integrations_development'
+      DB_PORT: 5432
+      DB_USERNAME: 'postgres'
+      DB_PASSWORD: 'postgres'
+      AWS_ACCESS_KEY_ID: C3AFA2D68CE42
+      AWS_SECRET_ACCESS_KEY: 7D8FE2CE7D64433AA89F43A354B81
+      AWS_ENDPOINT: 'http://minio:9002'
+    tty: true
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8087:8082"
+    restart: always
+    environment:
+      SERVER_PORT: 8082
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: broker:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: PLAIN
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="secret";'
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRYAUTH_USERNAME: consumer
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRYAUTH_PASSWORD: secret
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: 'connect'
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: 'http://connect:8083'
+      KAFKA_CLUSTERS_0_JMXPORT: 10098
+
+  redis-commander:
+    container_name: redis-commander
+    hostname: redis-commander
+    image: ghcr.io/joeferner/redis-commander:latest
+    restart: always
+    environment:
+    - REDIS_HOSTS=local:redis:6379
+    ports:
+    - "8084:8081"
+
+  fluentd:
+    build: ./docker/fluentd
+    container_name: fluentd
+    volumes:
+      - ./docker/fluentd/conf:/fluentd/etc
+    links:
+      - "elasticsearch"
+    depends_on:
+      - elasticsearch
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    profiles:
+      - logging
+
+  elasticsearch:
+    image: elasticsearch:8.14.1
+    container_name: elasticsearch
+    expose:
+      - 9200
+    ports:
+      - "9200:9200"
+    environment:
+      discovery.type: "single-node"
+      xpack.security.enabled: "false"
+    profiles:
+      - logging
+
+  kibana:
+    image: kibana:8.14.1
+    container_name: kibana
+    links:
+      - "elasticsearch"
+    ports:
+      - "5601:5601"
+    environment:
+      discovery.type: "single-node"
+      xpack.security.enabled: "false"
+      elasticsearch.url: "http://elasticsearch:9200"
+    profiles:
+      - logging
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
+    command: server /data --address ":9002" --console-address ":9001"
+    environment:
+      - MINIO_ACCESS_KEY=C3AFA2D68CE42
+      - MINIO_SECRET_KEY=7D8FE2CE7D64433AA89F43A354B81
+    ports:
+      - 9002:9002
+      - 9001:9001
